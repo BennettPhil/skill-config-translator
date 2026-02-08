@@ -1,40 +1,38 @@
 ---
 name: config-translator
-description: Convert configuration files between JSON, YAML, TOML, INI, and .env formats
+description: Converts configuration files between JSON, YAML, TOML, INI, and .env formats with comment preservation where supported.
 version: 0.1.0
 license: Apache-2.0
 ---
 
 # Config Translator
 
-## Purpose
+Converts configuration files between common formats: JSON, YAML, TOML, INI, and .env files. Reads from stdin or a file, detects the source format automatically (or accepts it explicitly), and outputs the translated configuration to stdout.
 
-A tool that converts configuration files between common formats: JSON, YAML, TOML, INI, and environment files (.env). It handles nested structures, arrays, and type coercion between formats, warning when a conversion is lossy (e.g., nested objects flattened to INI or .env).
+## Usage
 
-## Instructions
+```bash
+# Auto-detect input format, output as YAML
+./scripts/run.sh --to yaml config.json
 
-When the user wants to convert a configuration file:
+# Explicit source format, read from stdin
+cat settings.toml | ./scripts/run.sh --from toml --to json
 
-1. Run `scripts/run.sh` with the input file and desired output format.
-2. The tool reads the input file, detects its format (or uses `--from` to override), and converts to the target format specified by `--to`.
-3. Output is written to stdout by default, or to a file with `--output`.
+# Convert .env to JSON
+./scripts/run.sh --to json .env.production
+```
 
-## Inputs
+## Options
 
-- **Positional argument**: Path to the input configuration file. Required.
-- `--from <format>`: Source format (`json`, `yaml`, `toml`, `ini`, `env`). Auto-detected from file extension if omitted.
-- `--to <format>`: Target format (`json`, `yaml`, `toml`, `ini`, `env`). Required.
-- `--output <path>`: Write output to a file instead of stdout. Optional.
-- `--help`: Show usage information.
+- `--from <format>` — Source format: `json`, `yaml`, `toml`, `ini`, `env`. Auto-detected if omitted.
+- `--to <format>` — Target format (required): `json`, `yaml`, `toml`, `ini`, `env`.
+- `--help` — Show usage information.
 
-## Outputs
+## Supported Conversions
 
-- The converted configuration content, written to stdout or the specified output file.
-- Warnings printed to stderr when the conversion is lossy (e.g., nested objects cannot be represented in INI or .env format).
+All pairwise conversions are supported. Lossy conversions (e.g., nested JSON to flat .env) emit a warning to stderr. INI and .env formats only support flat or single-depth key-value structures; nested data is flattened using dot notation (e.g., `database.host=localhost`).
 
-## Constraints
+## Dependencies
 
-- Requires Python 3.7+ with `pyyaml` and `toml` packages.
-- INI and .env formats do not support nested structures or arrays. Nested keys are flattened using dot notation with a warning.
-- Comments from the source file are not preserved during conversion.
-- .env format only supports string key=value pairs; type information is lost.
+- Python 3.8+ (uses only standard library for JSON/INI/env; requires `pyyaml` and `toml`/`tomli` for YAML/TOML)
+- The script will check for required packages and print install instructions if missing.
