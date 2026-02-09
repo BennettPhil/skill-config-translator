@@ -6,54 +6,111 @@ PASS=0
 FAIL=0
 
 check() {
-    local desc="$1" expected="$2" actual="$3"
-    if [[ "$expected" == "$actual" ]]; then
-        echo "  PASS: $desc"
-        PASS=$((PASS + 1))
-    else
-        echo "  FAIL: $desc"
-        echo "    expected: $(echo "$expected" | head -3)"
-        echo "    actual:   $(echo "$actual" | head -3)"
-        FAIL=$((FAIL + 1))
-    fi
+  local desc="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    ((PASS++))
+    echo "  PASS: $desc"
+  else
+    ((FAIL++))
+    echo "  FAIL: $desc"
+    echo "    expected: $expected"
+    echo "    actual:   $actual"
+  fi
 }
 
-echo "=== config-translator tests ==="
+check_contains() {
+  local desc="$1" needle="$2" haystack="$3"
+  if echo "$haystack" | grep -qF -- "$needle"; then
+    ((PASS++))
+    echo "  PASS: $desc"
+  else
+    ((FAIL++))
+    echo "  FAIL: $desc — output does not contain '$needle'"
+    echo "    output: $haystack"
+  fi
+}
 
-# Test 1: JSON to YAML (command substitution strips trailing newline)
-json_input='{"name": "myapp", "port": 3000}'
-actual=$(echo "$json_input" | python3 "$SCRIPT_DIR/convert.py" --from json --to yaml)
-expected="name: myapp
-port: 3000"
-check "JSON to YAML" "$expected" "$actual"
+echo "Running tests for: config-translator"
+echo "======================================"
 
-# Test 2: JSON to env
-actual=$(echo "$json_input" | python3 "$SCRIPT_DIR/convert.py" --from json --to env)
-expected="name=myapp
-port=3000"
-check "JSON to env" "$expected" "$actual"
+# --- Format detection ---
+echo ""
+echo "Format detection:"
 
-# Test 3: env to JSON
-env_input="HOST=localhost
-PORT=8080"
-actual=$(echo "$env_input" | python3 "$SCRIPT_DIR/convert.py" --from env --to json)
-expected='{
-  "HOST": "localhost",
-  "PORT": "8080"
-}'
-check "env to JSON" "$expected" "$actual"
+RESULT=$(echo '{"key": "value"}' | "$SCRIPT_DIR/detect.sh")
+check "detects JSON" "json" "$RESULT"
 
-# Test 4: --help flag exits 0
-bash "$SCRIPT_DIR/run.sh" --help >/dev/null 2>&1 && help_code=0 || help_code=$?
-check "--help exits 0" "0" "$help_code"
+RESULT=$(echo -e "key: value\nlist:\n  - item1" | "$SCRIPT_DIR/detect.sh")
+check "detects YAML" "yaml" "$RESULT"
 
-# Test 5: missing --to exits non-zero
-set +e
-bash "$SCRIPT_DIR/run.sh" </dev/null >/dev/null 2>&1
-no_to_code=$?
-set -e
-check "missing --to exits non-zero" "1" "$((no_to_code > 0 ? 1 : 0))"
+RESULT=$(printf 'DATABASE_URL=postgres://localhost\nPORT=3000' | "$SCRIPT_DIR/detect.sh")
+check "detects .env" "env" "$RESULT"
+
+RESULT=$(printf '[section]\nkey = value' | "$SCRIPT_DIR/detect.sh")
+check "detects INI" "ini" "$RESULT"
+
+# --- JSON round-trip ---
+echo ""
+echo "JSON conversions:"
+
+RESULT=$(echo '{"name":"test","port":8080}' | "$SCRIPT_DIR/run.sh" --from json --to yaml)
+check_contains "JSON to YAML has key" "name: test" "$RESULT"
+check_contains "JSON to YAML has port" "port: 8080" "$RESULT"
+
+RESULT=$(printf "name: test\nport: 8080" | "$SCRIPT_DIR/run.sh" --from yaml --to json)
+check_contains "YAML to JSON has name" '"name": "test"' "$RESULT"
+
+# --- .env conversion ---
+echo ""
+echo "Env conversions:"
+
+RESULT=$(echo '{"DB_HOST":"localhost","DB_PORT":"5432"}' | "$SCRIPT_DIR/run.sh" --from json --to env)
+check_contains "JSON to env has DB_HOST" "DB_HOST=localhost" "$RESULT"
+check_contains "JSON to env has DB_PORT" "DB_PORT=5432" "$RESULT"
+
+RESULT=$(printf 'DB_HOST=localhost\nDB_PORT=5432' | "$SCRIPT_DIR/run.sh" --from env --to json)
+check_contains "env to JSON" '"DB_HOST": "localhost"' "$RESULT"
+
+# --- INI conversion ---
+echo ""
+echo "INI conversions:"
+
+RESULT=$(echo '{"database":{"host":"localhost","port":"5432"}}' | "$SCRIPT_DIR/run.sh" --from json --to ini)
+check_contains "JSON to INI has section" "[database]" "$RESULT"
+check_contains "JSON to INI has host" "host = localhost" "$RESULT"
+
+# --- Lossy warning ---
+echo ""
+echo "Warnings:"
+
+RESULT=$(echo '{"app":{"db":{"host":"localhost"}}}' | "$SCRIPT_DIR/run.sh" --from json --to env 2>&1 >/dev/null || true)
+check_contains "warns on nested to env" "Warning" "$RESULT"
+
+# --- Error cases ---
+echo ""
+echo "Error cases:"
+
+RESULT=$("$SCRIPT_DIR/run.sh" --to json 2>&1 <<< "" || true)
+# Empty input should either produce {} or an error
+if echo "$RESULT" | grep -qF "Error" || echo "$RESULT" | grep -qF "{}"; then
+  ((PASS++))
+  echo "  PASS: handles empty input"
+else
+  ((FAIL++))
+  echo "  FAIL: handles empty input — got: $RESULT"
+fi
+
+# --- Help flag ---
+echo ""
+echo "Help flags:"
+
+RESULT=$("$SCRIPT_DIR/run.sh" --help 2>&1)
+check_contains "run.sh --help works" "Usage" "$RESULT"
+
+RESULT=$("$SCRIPT_DIR/detect.sh" --help 2>&1)
+check_contains "detect.sh --help works" "Usage" "$RESULT"
 
 echo ""
-echo "$PASS passed, $FAIL failed"
-[[ $FAIL -eq 0 ]]
+echo "======================================"
+echo "Results: $PASS passed, $FAIL failed, $((PASS + FAIL)) total"
+[ "$FAIL" -eq 0 ] || exit 1

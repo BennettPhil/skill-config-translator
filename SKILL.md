@@ -1,124 +1,61 @@
 ---
 name: config-translator
-description: Converts between config formats (JSON, YAML, TOML, INI, dotenv) with lossy conversion warnings.
+description: Translate configuration files between JSON, YAML, TOML, INI, and .env formats with lossy conversion warnings.
 version: 0.1.0
 license: Apache-2.0
 ---
 
 # Config Translator
 
+A composable set of shell scripts that convert between common configuration file formats: JSON, YAML, TOML, INI, and .env files.
+
 ## Purpose
 
-Convert configuration files between JSON, YAML, TOML, INI, and .env formats. Handles nested structures, arrays, and type coercion. Warns when a conversion is lossy (e.g., YAML comments lost in JSON, nested objects flattened in .env).
+Configuration files come in many formats. Moving between projects, tools, or deployment targets often requires converting config from one format to another. This skill provides a Unix-friendly pipeline for translating between JSON, YAML, TOML, INI, and .env formats while warning about lossy conversions (e.g., nested structures flattened to .env).
 
-## Quick Start
+## Scripts Overview
 
-```bash
-$ ./scripts/run.sh input.json --to yaml
-# Outputs YAML to stdout
-database:
-  host: localhost
-  port: 5432
-  name: myapp
-```
+| Script | Description |
+|--------|-------------|
+| `scripts/run.sh` | Main entry point — detects input format and converts to target |
+| `scripts/detect.sh` | Auto-detects the format of a config file |
+| `scripts/to-json.sh` | Converts any supported format to JSON (canonical intermediate) |
+| `scripts/from-json.sh` | Converts JSON to any supported target format |
+| `scripts/validate.sh` | Validates that a file is well-formed for its format |
+| `scripts/install.sh` | Checks and installs required dependencies |
+| `scripts/test.sh` | Runs tests with sample configs |
 
-### Example: JSON to YAML
-
-```bash
-$ echo '{"server": {"host": "0.0.0.0", "port": 8080}}' | ./scripts/run.sh --from json --to yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-```
-
-### Example: YAML to TOML
+## Pipeline Examples
 
 ```bash
-$ echo -e "database:\n  host: localhost\n  port: 5432" | ./scripts/run.sh --from yaml --to toml
-[database]
-host = "localhost"
-port = 5432
+# Convert YAML to TOML
+cat config.yaml | ./scripts/to-json.sh --from yaml | ./scripts/from-json.sh --to toml
+
+# Auto-detect and convert
+./scripts/run.sh --to env config.yaml
+
+# Validate before converting
+./scripts/validate.sh config.toml && ./scripts/run.sh --to json config.toml
+
+# Chain: detect format, then convert
+FORMAT=$(./scripts/detect.sh config.txt)
+./scripts/run.sh --from "$FORMAT" --to yaml config.txt
 ```
 
-### Example: JSON to .env (Flat)
+## Inputs and Outputs
 
-```bash
-$ echo '{"DB_HOST": "localhost", "DB_PORT": "5432"}' | ./scripts/run.sh --from json --to env
-DB_HOST=localhost
-DB_PORT=5432
-```
+All scripts read from stdin or accept a file path as the last argument. Output goes to stdout. Errors and warnings go to stderr.
 
-### Example: .env to JSON
+## Environment Variables
 
-```bash
-$ echo -e "APP_NAME=myapp\nDEBUG=true\nPORT=3000" | ./scripts/run.sh --from env --to json
-{
-  "APP_NAME": "myapp",
-  "DEBUG": "true",
-  "PORT": "3000"
-}
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONFIG_TRANSLATOR_WARN` | `1` | Set to `0` to suppress lossy conversion warnings |
+| `CONFIG_TRANSLATOR_STRICT` | `0` | Set to `1` to fail on lossy conversions instead of warning |
 
-### Example: Lossy Conversion Warning
+## Constraints
 
-```bash
-$ echo '{"a": {"b": {"c": "deep"}}}' | ./scripts/run.sh --from json --to env
-# Warning: Nested structures flattened with underscore separator
-A_B_C=deep
-```
-
-## Smoke Tests
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT="./scripts/run.sh"
-PASS=0; FAIL=0
-check() {
-  local desc="$1" expected="$2" actual="$3"
-  if [ "$expected" = "$actual" ]; then
-    ((PASS++)); echo "PASS: $desc"
-  else
-    ((FAIL++)); echo "FAIL: $desc"
-    echo "  expected: $expected"
-    echo "  actual:   $actual"
-  fi
-}
-
-# Test JSON to env
-actual=$(echo '{"FOO": "bar"}' | $SCRIPT --from json --to env 2>/dev/null)
-check "json to env" "FOO=bar" "$actual"
-
-# Test env to json
-actual=$(echo "FOO=bar" | $SCRIPT --from env --to json 2>/dev/null)
-expected='{"FOO":"bar"}'
-# Normalize whitespace for comparison
-actual_norm=$(echo "$actual" | tr -d ' \n')
-check "env to json" "$expected" "$actual_norm"
-
-# Test missing --from with stdin
-actual=$($SCRIPT --to json 2>&1 || true)
-check "error without --from on stdin" "Error: --from is required when reading from stdin" "$actual"
-
-echo "$PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
-```
-
-## Options Reference
-
-| Flag         | Default | Description                                        |
-|--------------|---------|----------------------------------------------------|
-| `--from FMT` | auto    | Input format: json, yaml, toml, ini, env. Auto-detected from file extension |
-| `--to FMT`   | (required) | Output format: json, yaml, toml, ini, env       |
-| `--output FILE` | stdout | Write to file instead of stdout                 |
-| `--flatten SEP` | `_`  | Separator for flattening nested keys (env/ini)   |
-| `--help`     |         | Show usage information                            |
-
-## Error Handling
-
-| Exit Code | Meaning                                |
-|-----------|----------------------------------------|
-| 0         | Success                                |
-| 1         | Usage error (missing flags, bad format)|
-| 2         | Parse error (invalid input)            |
-| 3         | Conversion error (unsupported feature) |
+- Nested structures deeper than 3 levels are flattened with dot-notation for INI and .env
+- Comments are preserved only when converting between formats that both support them
+- Binary values are not supported
+- Requires Python 3.6+ (for TOML/YAML parsing)
